@@ -1,1 +1,1 @@
-maturin build --release
+maturin develop
