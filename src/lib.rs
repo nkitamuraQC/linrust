@@ -1,115 +1,238 @@
-use ndarray::{Array1, Array2};
-use numpy::Complex64;
-use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
-use pyo3::prelude::*;
-use ndarray_linalg::{
-    DeterminantInto, Eig, Inverse, Norm, QRInto, SVDInto,
-};
+use std::ffi::c_double;
+use libc::size_t;
+use ndarray::{ArrayView1, ArrayView2, Array2};
+use ndarray_linalg::{Determinant, Inverse, Eig, QR, SVDDC, Norm};
+use ndarray_linalg::svddc::{JobSvd};
 
-#[pyfunction]
-fn dot(a: PyReadonlyArray1<f64>, b: PyReadonlyArray1<f64>) -> PyResult<f64> {
-    Ok(a.as_array().dot(&b.as_array()))
+#[no_mangle]
+pub extern "C" fn dot_product(
+    a: *const c_double,
+    b: *const c_double,
+    len: size_t,
+) -> c_double {
+    let a_slice = unsafe { std::slice::from_raw_parts(a, len) };
+    let b_slice = unsafe { std::slice::from_raw_parts(b, len) };
+    ArrayView1::from(a_slice).dot(&ArrayView1::from(b_slice))
 }
 
-#[pyfunction]
-fn normalize<'py>(py: Python<'py>, a: PyReadonlyArray1<f64>) -> PyResult<&'py PyArray1<f64>> {
-    let a = a.as_array();
-    let norm = a.norm_l2();
-    Ok((a.to_owned() / norm).into_pyarray(py))
+#[no_mangle]
+pub extern "C" fn normalize(
+    a: *const c_double,
+    len: size_t,
+    out: *mut c_double,
+) {
+    let a_slice = unsafe { std::slice::from_raw_parts(a, len) };
+    let mut out_slice = unsafe { std::slice::from_raw_parts_mut(out, len) };
+
+    let vec = ArrayView1::from(a_slice);
+    let norm = vec.norm_l2();
+    
+    if norm == 0.0 {
+        // normが0の場合、エラー処理
+        return; // normがゼロの場合、正規化できません
+    }
+    
+    for (i, val) in vec.iter().enumerate() {
+        out_slice[i] = *val / norm;
+    }
 }
 
-#[pyfunction]
-fn matmul<'py>(
-    py: Python<'py>,
-    a: PyReadonlyArray2<f64>,
-    b: PyReadonlyArray2<f64>,
-) -> PyResult<&'py PyArray2<f64>> {
-    let a = a.as_array();
-    let b = b.as_array();
-    Ok(a.dot(&b).into_pyarray(py))
+#[no_mangle]
+pub extern "C" fn matmul(
+    a: *const c_double,
+    b: *const c_double,
+    a_rows: size_t,
+    a_cols: size_t,
+    b_cols: size_t,
+    out: *mut c_double,
+) {
+    let a_slice = unsafe { std::slice::from_raw_parts(a, a_rows * a_cols) };
+    let b_slice = unsafe { std::slice::from_raw_parts(b, a_cols * b_cols) };
+    let mut out_slice = unsafe { std::slice::from_raw_parts_mut(out, a_rows * b_cols) };
+
+    let a_mat = match ArrayView2::from_shape((a_rows, a_cols), a_slice) {
+        Ok(mat) => mat,
+        Err(_) => return, // エラー処理
+    };
+
+    let b_mat = match ArrayView2::from_shape((a_cols, b_cols), b_slice) {
+        Ok(mat) => mat,
+        Err(_) => return, // エラー処理
+    };
+
+    let result = a_mat.dot(&b_mat);
+
+    // as_slice() が Some でない場合の処理
+    match result.as_slice() {
+        Some(slice) => out_slice.copy_from_slice(slice),
+        None => return, // エラー処理
+    }
 }
 
-#[pyfunction]
-fn transpose<'py>(py: Python<'py>, a: PyReadonlyArray2<f64>) -> PyResult<&'py PyArray2<f64>> {
-    Ok(a.as_array().t().to_owned().into_pyarray(py))
+#[no_mangle]
+pub extern "C" fn transpose(
+    a: *const c_double,
+    rows: size_t,
+    cols: size_t,
+    out: *mut c_double,
+) {
+    let a_slice = unsafe { std::slice::from_raw_parts(a, rows * cols) };
+    let out_slice = unsafe { std::slice::from_raw_parts_mut(out, rows * cols) };
+
+    // 行列を作成
+    let a_mat = ArrayView2::from_shape((rows, cols), a_slice).unwrap();
+    let t_mat = a_mat.t();  // 転置ビュー（コピーではない）
+
+    // 転置を out_slice に書き出す（要コピー）
+    for i in 0..cols {
+        for j in 0..rows {
+            out_slice[i * rows + j] = t_mat[(i, j)];
+        }
+    }
 }
 
-#[pyfunction]
-fn determinant(a: PyReadonlyArray2<f64>) -> PyResult<f64> {
-    a.as_array()
-        .to_owned()
-        .det_into()
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("det error: {:?}", e)))
+#[no_mangle]
+pub extern "C" fn determinant(
+    a: *const c_double,
+    n: size_t,
+) -> c_double {
+    let a_slice = unsafe { std::slice::from_raw_parts(a, n * n) };
+    let a_mat = match Array2::from_shape_vec((n, n), a_slice.to_vec()) {
+        Ok(mat) => mat,
+        Err(_) => return 0.0, // エラー処理
+    };
+
+    match a_mat.det() {
+        Ok(det) => det,
+        Err(_) => 0.0, // エラー処理
+    }
 }
 
-#[pyfunction]
-fn inverse<'py>(py: Python<'py>, a: PyReadonlyArray2<f64>) -> PyResult<&'py PyArray2<f64>> {
-    a.as_array()
-        .to_owned()
-        .inv()
-        .map(|inv| inv.into_pyarray(py))
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("inv error: {:?}", e)))
+#[no_mangle]
+pub extern "C" fn inverse(
+    a: *const c_double,
+    n: size_t,
+    out: *mut c_double,
+) {
+    let a_slice = unsafe { std::slice::from_raw_parts(a, n * n) };
+    let mut out_slice = unsafe { std::slice::from_raw_parts_mut(out, n * n) };
+
+    let a_mat = match Array2::from_shape_vec((n, n), a_slice.to_vec()) {
+        Ok(mat) => mat,
+        Err(_) => return, // エラー処理
+    };
+
+    match a_mat.inv() {
+        Ok(inv) => match inv.as_slice() {
+            Some(slice) => out_slice.copy_from_slice(slice),
+            None => return, // エラー処理
+        },
+        Err(_) => return, // エラー処理
+    }
 }
 
-#[pyfunction]
-fn eigen<'py>(py: Python<'py>, a: PyReadonlyArray2<f64>) -> PyResult<(&'py PyArray1<Complex64>, &'py PyArray2<Complex64>)> {
-    let a = a.as_array().to_owned();
-    let (values, vectors) = a
-        .eig()
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("eigen error: {:?}", e)))?;
-    Ok((values.into_pyarray(py), vectors.into_pyarray(py)))
+#[no_mangle]
+pub extern "C" fn diagonalize(a: *const f64, n: usize, eigvals: *mut f64, eigvecs: *mut f64) {
+    let a_slice = unsafe { std::slice::from_raw_parts(a, n * n) };
+    let a_mat = match Array2::from_shape_vec((n, n), a_slice.to_vec()) {
+        Ok(mat) => mat,
+        Err(_) => return, // エラー処理
+    };
+
+    match a_mat.eig() {
+        Ok((vals, vecs)) => {
+            let eigvals_slice = unsafe { std::slice::from_raw_parts_mut(eigvals, n) };
+            let eigvecs_slice = unsafe { std::slice::from_raw_parts_mut(eigvecs, n * n) };
+
+            for i in 0..n {
+                eigvals_slice[i] = vals[i].re;
+            }
+
+            let flat_vecs = match vecs.as_slice() {
+                Some(slice) => slice,
+                None => return, // エラー処理
+            };
+
+            for i in 0..n * n {
+                eigvecs_slice[i] = flat_vecs[i].re;
+            }
+        }
+        Err(_) => return, // エラー処理
+    }
 }
 
-/*
-#[pyfunction]
-fn lu_decomposition<'py>(py: Python<'py>, a: PyReadonlyArray2<f64>) -> PyResult<(&'py PyArray2<f64>, &'py PyArray2<f64>)> {
-    let (l, u) = a
-        .as_array()
-        .to_owned()
-        .lu_into()
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("LU error: {:?}", e)))?;
-    Ok((l.into_pyarray(py), u.into_pyarray(py)))
-}
-*/
+#[no_mangle]
+pub extern "C" fn qr_decompose(
+    a: *const c_double,
+    rows: size_t,
+    cols: size_t,
+    q_out: *mut c_double,
+    r_out: *mut c_double,
+) {
+    let a_slice = unsafe { std::slice::from_raw_parts(a, rows * cols) };
+    let a_mat = match Array2::from_shape_vec((rows, cols), a_slice.to_vec()) {
+        Ok(mat) => mat,
+        Err(_) => return, // エラー処理
+    };
 
-#[pyfunction]
-fn qr_decomposition<'py>(py: Python<'py>, a: PyReadonlyArray2<f64>) -> PyResult<(&'py PyArray2<f64>, &'py PyArray2<f64>)> {
-    let (q, r) = a
-        .as_array()
-        .to_owned()
-        .qr_into()
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("QR error: {:?}", e)))?;
-    Ok((q.into_pyarray(py), r.into_pyarray(py)))
-}
+    match a_mat.qr() {
+        Ok((q, r)) => {
+            let q_slice = unsafe { std::slice::from_raw_parts_mut(q_out, rows * cols) };
+            let r_slice = unsafe { std::slice::from_raw_parts_mut(r_out, cols * cols) };
 
-#[pyfunction]
-fn svd_decomposition<'py>(
-    py: Python<'py>,
-    a: PyReadonlyArray2<f64>,
-) -> PyResult<(&'py PyArray2<f64>, &'py PyArray1<f64>, &'py PyArray2<f64>)> {
-    let (u_opt, s, vt_opt) = a
-        .as_array()
-        .to_owned()
-        .svd_into(true, true)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("SVD error: {:?}", e)))?;
+            match q.as_slice() {
+                Some(slice) => q_slice.copy_from_slice(slice),
+                None => return, // エラー処理
+            }
 
-    let u = u_opt.ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Missing U matrix from SVD"))?;
-    let vt = vt_opt.ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Missing VT matrix from SVD"))?;
-
-    Ok((u.into_pyarray(py), s.into_pyarray(py), vt.into_pyarray(py)))
+            match r.as_slice() {
+                Some(slice) => r_slice.copy_from_slice(slice),
+                None => return, // エラー処理
+            }
+        }
+        Err(_) => return, // エラー処理
+    }
 }
 
-#[pymodule]
-fn linrust(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(dot, m)?)?;
-    m.add_function(wrap_pyfunction!(normalize, m)?)?;
-    m.add_function(wrap_pyfunction!(matmul, m)?)?;
-    m.add_function(wrap_pyfunction!(transpose, m)?)?;
-    m.add_function(wrap_pyfunction!(determinant, m)?)?;
-    m.add_function(wrap_pyfunction!(inverse, m)?)?;
-    m.add_function(wrap_pyfunction!(eigen, m)?)?;
-    // m.add_function(wrap_pyfunction!(lu_decomposition, m)?)?;
-    m.add_function(wrap_pyfunction!(qr_decomposition, m)?)?;
-    m.add_function(wrap_pyfunction!(svd_decomposition, m)?)?;
-    Ok(())
+#[no_mangle]
+pub extern "C" fn svd_decompose(
+    a: *const f64,
+    rows: usize,
+    cols: usize,
+    u_out: *mut f64,
+    s_out: *mut f64,
+    vt_out: *mut f64
+) {
+    let a_slice = unsafe { std::slice::from_raw_parts(a, rows * cols) };
+    let a_mat = match Array2::from_shape_vec((rows, cols), a_slice.to_vec()) {
+        Ok(mat) => mat,
+        Err(_) => return, // エラー処理
+    };
+
+    match a_mat.svddc(JobSvd::All) {
+        Ok((u_opt, s, vt_opt)) => {
+            let u = u_opt.unwrap_or_else(|| Array2::zeros((rows, rows)));
+            let vt = vt_opt.unwrap_or_else(|| Array2::zeros((cols, cols)));
+
+            let u_slice = unsafe { std::slice::from_raw_parts_mut(u_out, rows * rows) };
+            let s_slice = unsafe { std::slice::from_raw_parts_mut(s_out, std::cmp::min(rows, cols)) };
+            let vt_slice = unsafe { std::slice::from_raw_parts_mut(vt_out, cols * cols) };
+
+            match u.as_slice() {
+                Some(slice) => u_slice.copy_from_slice(slice),
+                None => return, // エラー処理
+            }
+
+            match s.as_slice() {
+                Some(slice) => s_slice.copy_from_slice(slice),
+                None => return, // エラー処理
+            }
+
+            match vt.as_slice() {
+                Some(slice) => vt_slice.copy_from_slice(slice),
+                None => return, // エラー処理
+            }
+        }
+        Err(_) => return, // エラー処理
+    }
 }

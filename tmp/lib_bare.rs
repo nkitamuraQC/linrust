@@ -13,7 +13,7 @@ fn dot_product(a: Vec<f64>, b: Vec<f64>) -> PyResult<f64> {
 
 /// Pythonモジュールとしてエクスポート
 #[pymodule]
-fn dot_product(_py: Python, m: &PyModule) -> PyResult<()> {
+fn dot_product(_py: Python, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dot_product, m)?)?;
     Ok(())
 }

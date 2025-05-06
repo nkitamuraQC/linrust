@@ -1,1 +1,2 @@
-maturin develop
+# maturin develop
+cargo build --release

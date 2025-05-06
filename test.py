@@ -1,66 +1,81 @@
 import numpy as np
-import linrust as la
 import pytest
+from linrust import *
 
-A = np.array([[4.0, 2.0], [3.0, 5.0]])
-v = np.array([1.0, 2.0])
+def test_dot():
+    a = np.array([1.0, 2.0, 3.0])
+    b = np.array([4.0, 5.0, 6.0])
+    assert dot(a, b) == pytest.approx(np.dot(a, b))
 
-def test1():
-    # Test the linear algebra functions
+def test_normalize():
+    a = np.array([3.0, 4.0])
+    result = normalize(a)
+    expected = a / np.linalg.norm(a)
+    assert np.allclose(result, expected)
 
-    assert np.allclose(la.dot(v, v), np.dot(v, v))
+def test_matmul():
+    A = np.array([[1.0, 2.0], [3.0, 4.0]])
+    B = np.array([[5.0, 6.0], [7.0, 8.0]])
+    result = matmul(A, B)
+    expected = A @ B
+    assert np.allclose(result, expected)
 
-def test2():
-    # normalize
-    assert np.allclose(la.normalize(v), v / np.linalg.norm(v))
-    
-def test3():
-    # matmul
-    assert np.allclose(la.matmul(A, A), A @ A)
-    
-def test4():
-    # transpose
-    assert np.allclose(la.transpose(A), A.T)
-    
-def test5():
-    # determinant
-    assert np.allclose(la.determinant(A), np.linalg.det(A))
-    
-def test6():
-    # inverse
-    assert np.allclose(la.inverse(A), np.linalg.inv(A))
-    
-def test7():
-    # eigenvalues
-    e1, c1 = la.eigen(A)
-    e2, c2 = np.linalg.eig(A)
-    # print(e1, e2)
-    # eigen値は順序が異なる可能性があるため、集合的に比較
-    assert np.allclose(np.sort_complex(e1), np.sort_complex(e2))
-    
-def _test8():
-    # LU decomposition
-    L, U = la.lu_decomposition(A)
-    from scipy.linalg import lu
-    P, L_np, U_np = lu(A)
-    assert np.allclose(L, L_np)
-    assert np.allclose(U, U_np)
-    
-def test9():
-    # QR decomposition
-    Q, R = la.qr_decomposition(A)
-    Q_np, R_np = np.linalg.qr(A)
-    # 符号の差異に注意（浮動小数点分解の特性）
-    assert np.allclose(np.abs(Q), np.abs(Q_np), atol=1e-6)
-    assert np.allclose(R, R_np, atol=1e-6)
-    
-def test10():
-    # SVD decomposition
-    U_r, S_r, VT_r = la.svd_decomposition(A)
-    U_np, S_np, VT_np = np.linalg.svd(A)
-    # 並び替えられていない可能性があるが通常一致
-    assert np.allclose(np.abs(U_r), np.abs(U_np), atol=1e-6)
-    assert np.allclose(S_r, S_np, atol=1e-6)
-    assert np.allclose(np.abs(VT_r), np.abs(VT_np), atol=1e-6)
-    
-    #print("✅ All tests passed.")
+def test_transpose():
+    A = np.array([[1.0, 2.0], [3.0, 4.0]])
+    result = transpose(A)
+    expected = A.T
+    assert np.allclose(result, expected)
+
+def test_determinant():
+    A = np.array([[4.0, 7.0], [2.0, 6.0]])
+    result = determinant(A)
+    expected = np.linalg.det(A)
+    assert result == pytest.approx(expected)
+
+def test_inverse():
+    A = np.array([[1.0, 2.0], [3.0, 4.0]])
+    result = inverse(A)
+    expected = np.linalg.inv(A)
+    assert np.allclose(result, expected)
+
+def test_diagonalize():
+    A = np.array([[2.0, 0.0], [0.0, 3.0]])
+    vals, vecs = diagonalize(A)
+    w, v = np.linalg.eig(A)
+    assert np.allclose(sorted(vals), sorted(w))
+    # Eigenvectors may differ by sign or order, so skip strict test
+
+def test_qr_decompose():
+    A = np.array([[12.0, -51.0], [6.0, 167.0]])
+    q, r = qr_decompose(A)
+    Q, R = np.linalg.qr(A)
+    assert np.allclose(np.abs(q), np.abs(Q), atol=1e-5)  # allow sign flip
+    assert np.allclose(r, R, atol=1e-5)
+
+def test_svd_decompose():
+    A = np.array([[1.0, 2.0], [3.0, 4.0]])
+    u, s, vt = svd_decompose(A)
+    U, S, VT = np.linalg.svd(A)
+    assert np.allclose(np.abs(u), np.abs(U), atol=1e-5)
+    assert np.allclose(s, S, atol=1e-5)
+    assert np.allclose(np.abs(vt), np.abs(VT), atol=1e-5)
+
+if __name__ == "__main__":
+    test_dot()
+    print("Dot product test passed!")
+    test_normalize()
+    print("Normalization test passed!")
+    test_matmul()
+    print("Matrix multiplication test passed!")
+    test_transpose()
+    print("Transpose test passed!")
+    test_determinant()
+    print("Determinant test passed!")
+    test_inverse()
+    print("Inverse test passed!")
+    test_diagonalize()
+    print("Diagonalization test passed!")
+    test_qr_decompose()
+    print("QR decomposition test passed!")
+    test_svd_decompose()
+    print("All tests passed!")
