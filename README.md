@@ -6,5 +6,5 @@ See test.py
 
 ## Compilation
 1. Install the Rust compiler.
-2. Do ```pip install- r requirements.txt```
+2. Do ```pip install -r requirements.txt```
 4. Do ```bash build.sh```
